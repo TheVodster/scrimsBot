@@ -1,0 +1,116 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 220 13% 18%;
+  --foreground: 0 0% 98%;
+  
+  --muted: 240 3.7% 15.9%;
+  --muted-foreground: 240 5% 64.9%;
+  
+  --popover: 240 10% 3.9%;
+  --popover-foreground: 0 0% 98%;
+  
+  --card: 240 10% 3.9%;
+  --card-foreground: 0 0% 98%;
+  
+  --border: 240 3.7% 15.9%;
+  --input: 240 3.7% 15.9%;
+  
+  --primary: 235 86% 65%;
+  --primary-foreground: 0 0% 100%;
+  
+  --secondary: 240 3.7% 15.9%;
+  --secondary-foreground: 0 0% 98%;
+  
+  --accent: 12 90% 60%;
+  --accent-foreground: 0 0% 98%;
+  
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 0 0% 98%;
+  
+  --success: 142 76% 36%;
+  --success-foreground: 0 0% 98%;
+  
+  --ring: 240 4.9% 83.9%;
+  --radius: 0.5rem;
+  
+  /* Discord-specific colors */
+  --discord-blue: 235 86% 65%;
+  --discord-green: 142 76% 36%;
+  --discord-red: 359 87% 59%;
+  --discord-yellow: 47 87% 67%;
+  --discord-dark: 214 13% 24%;
+  --discord-darker: 220 13% 18%;
+  --discord-darkest: 220 14% 13%;
+  --discord-light: 210 9.8% 80%;
+  
+  /* Sidebar colors */
+  --sidebar-background: 220 14% 13%;
+  --sidebar-foreground: 0 0% 98%;
+  --sidebar-primary: 235 86% 65%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 214 13% 24%;
+  --sidebar-accent-foreground: 0 0% 98%;
+  --sidebar-border: 216 7% 14%;
+  --sidebar-ring: 235 86% 65%;
+  
+  /* Chart Colors */
+  --chart-1: 235 86% 65%;
+  --chart-2: 142 76% 36%;
+  --chart-3: 47 87% 67%;
+  --chart-4: 359 87% 59%;
+  --chart-5: 262 83% 58%;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply font-sans antialiased bg-sidebar text-foreground;
+  }
+
+  /* Custom scrollbar for the Discord-like dark theme */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: hsl(var(--sidebar-background));
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted));
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground));
+  }
+}
+
+@layer components {
+  .status-badge {
+    @apply px-2 py-1 rounded-full text-xs font-medium text-white uppercase;
+  }
+  
+  .status-open {
+    @apply bg-[#57F287];
+  }
+  
+  .status-scheduled {
+    @apply bg-[#5865F2];
+  }
+  
+  .status-completed {
+    @apply bg-[#4F545C];
+  }
+  
+  .status-cancelled {
+    @apply bg-[#ED4245];
+  }
+}
