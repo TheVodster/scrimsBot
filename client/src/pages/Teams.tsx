@@ -74,7 +74,7 @@ export default function Teams() {
     const searchTerm = teamFilter.toLowerCase();
     return (
       team.name.toLowerCase().includes(searchTerm) ||
-      team.captainUsername.toLowerCase().includes(searchTerm)
+      team.captain.username.toLowerCase().includes(searchTerm)
     );
   });
 
@@ -170,8 +170,8 @@ export default function Teams() {
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{team.name}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-200">
                         <div className="flex flex-col">
-                          <span>{team.captainUsername}</span>
-                          <span className="text-xs text-gray-400 font-mono">ID: {team.captainInGameId}</span>
+                          <span>{team.captain.username}</span>
+                          <span className="text-xs text-gray-400 font-mono">ID: {team.captain.inGameId}</span>
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-200">
@@ -267,3 +267,4 @@ export default function Teams() {
     </div>
   );
 }
+

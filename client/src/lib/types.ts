@@ -12,9 +12,7 @@ export interface TeamMember {
 export interface Team {
   id: number;
   name: string;
-  captainDiscordId: string;
-  captainUsername: string;
-  captainInGameId: string;
+  captain: TeamMember;
   members: TeamMember[];
 }
 

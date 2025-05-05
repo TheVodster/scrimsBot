@@ -123,9 +123,11 @@ export function registerCommands(storage: IStorage) {
         // Create the team and add the user as captain.
         const team = await storage.createTeam({
           name: teamName,
-          captainDiscordId: interaction.user.id,
-          captainUsername: interaction.user.tag,
-          captainInGameId: inGameId
+          captain: {
+            discordId: interaction.user.id,
+            username: interaction.user.tag,
+            inGameId: inGameId
+          }
         });
 
         await storage.createTeamMember({
