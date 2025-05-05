@@ -142,40 +142,84 @@ export function registerCommands(storage: IStorage) {
     "join-team": async (interaction: CommandInteraction) => {
       if (!interaction.isChatInputCommand()) return;
 
-      const teamName = interaction.options.getString("team_name", true);
-      const inGameId = interaction.options.getString("in_game_id", true);
+      // Build the modal for joining a team.
+      const joinTeamModal = new ModalBuilder()
+          .setCustomId("joinTeamModal")
+          .setTitle("Join Team");
 
-      const team = await storage.getTeamByName(teamName);
-      if (!team) {
-        await interaction.reply({
-          content: `Team "${teamName}" does not exist. Please check the team name.`,
+      const teamNameInput = new TextInputBuilder()
+          .setCustomId("team_name")
+          .setLabel("Team Name")
+          .setStyle(TextInputStyle.Short)
+          .setPlaceholder("Enter the team name")
+          .setRequired(true);
+
+      const inGameIdInput = new TextInputBuilder()
+          .setCustomId("in_game_id")
+          .setLabel("In-Game ID")
+          .setStyle(TextInputStyle.Short)
+          .setPlaceholder("Enter your in-game ID without server ID (e.g. 1234567)")
+          .setRequired(true);
+
+      joinTeamModal.addComponents(
+          new ActionRowBuilder<TextInputBuilder>().addComponents(teamNameInput),
+          new ActionRowBuilder<TextInputBuilder>().addComponents(inGameIdInput)
+      );
+
+      // Show the modal to the user.
+      await interaction.showModal(joinTeamModal);
+
+      try {
+        // Await modal submission.
+        const modalSubmit = await interaction.awaitModalSubmit({
+          filter: (i: any) =>
+              i.customId === "joinTeamModal" && i.user.id === interaction.user.id,
+          time: 60000
+        });
+        const teamName = modalSubmit.fields.getTextInputValue("team_name");
+        const inGameId = modalSubmit.fields.getTextInputValue("in_game_id");
+
+        // Check if the team exists.
+        const team = await storage.getTeamByName(teamName);
+        if (!team) {
+          await modalSubmit.reply({
+            content: `Team \`${teamName}\` does not exist. Please check the team name.`,
+            ephemeral: true
+          });
+          return;
+        }
+
+        // Ensure the user is not already in a team.
+        const existingMember = await storage.getTeamMemberByDiscordId(interaction.user.id);
+        if (existingMember) {
+          const existingTeam = await storage.getTeam(existingMember.teamId);
+          await modalSubmit.reply({
+            content: `You are already a member of team \`${existingTeam?.name}\`. Please leave that team first.`,
+            ephemeral: true
+          });
+          return;
+        }
+
+        // Add the user to the team.
+        await storage.createTeamMember({
+          teamId: team.id,
+          discordId: interaction.user.id,
+          username: interaction.user.tag,
+          inGameId: inGameId,
+          isCaptain: false
+        });
+
+        await modalSubmit.reply({
+          content: `You have joined team \`${teamName}\`!`,
+          ephemeral: true
+        });
+      } catch (err) {
+        await interaction.followUp({
+          content: "No submission was made in time.",
           ephemeral: true
         });
         return;
       }
-
-      const existingMember = await storage.getTeamMemberByDiscordId(interaction.user.id);
-      if (existingMember) {
-        const existingTeam = await storage.getTeam(existingMember.teamId);
-        await interaction.reply({
-          content: `You are already a member of the team "${existingTeam?.name}". Please leave that team first.`,
-          ephemeral: true
-        });
-        return;
-      }
-
-      await storage.createTeamMember({
-        teamId: team.id,
-        discordId: interaction.user.id,
-        username: interaction.user.tag,
-        inGameId: inGameId,
-        isCaptain: false
-      });
-
-      await interaction.reply({
-        content: `You have joined team "${teamName}"!`,
-        ephemeral: false
-      });
     },
 
     "schedule-scrim": async (interaction: ChatInputCommandInteraction) => {
@@ -353,15 +397,7 @@ export function registerCommands(storage: IStorage) {
 
       new SlashCommandBuilder()
         .setName("join-team")
-        .setDescription("Join an existing team (Team Player)")
-        .addStringOption(option =>
-          option.setName("team_name")
-            .setDescription("Name of the team to join")
-            .setRequired(true))
-        .addStringOption(option =>
-          option.setName("in_game_id")
-            .setDescription("Your in-game ID")
-            .setRequired(true)),
+        .setDescription("Join an existing team (Team Player)"),
 
       new SlashCommandBuilder()
         .setName("schedule-scrim")
