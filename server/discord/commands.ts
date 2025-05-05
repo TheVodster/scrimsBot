@@ -224,7 +224,7 @@ export function registerCommands(storage: IStorage) {
         return;
       }
 
-      let scrims = await storage.getOpenScrims();
+      const scrims = await storage.getOpenScrims();
       if (!scrims || scrims.length === 0) {
         await interaction.reply({
           content: "No available scrims to join.",
@@ -233,27 +233,15 @@ export function registerCommands(storage: IStorage) {
         return;
       }
 
-      // Sort scrims chronologically using DD-MM format
-      scrims.sort((a, b) => {
-          const [dayA, monthA] = a.date.split("-").map(Number);
-          const [dayB, monthB] = b.date.split("-").map(Number);
-          if (monthA !== monthB) return monthA - monthB;
-          if (dayA !== dayB) return dayA - dayB;
-
-          const [hourA, minuteA] = a.time.split(":").map(Number);
-          const [hourB, minuteB] = b.time.split(":").map(Number);
-
-          if (hourA !== hourB) return hourA - hourB;
-          return minuteA - minuteB;
-      });
-
-      const options = scrims.map(scrim => {
+      const options = await Promise.all(scrims.map(async scrim => {
+        const team = await storage.getTeam(scrim.team1Id);
+        const teamName = team?.name || "Unknown team";
         return {
-          label: `Scrim ${scrim.id}`,
+          label: `Scrim vs ${teamName}`,
           description: `${scrim.date} at ${scrim.time}`,
           value: scrim.id.toString()
         };
-      });
+      }));
 
       const scrimSelect = new StringSelectMenuBuilder()
           .setCustomId("select_scrim")
