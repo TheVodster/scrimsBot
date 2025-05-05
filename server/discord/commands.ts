@@ -90,6 +90,15 @@ export function registerCommands(storage: IStorage) {
         const teamName = modalSubmit.fields.getTextInputValue("team_name");
         const inGameId = modalSubmit.fields.getTextInputValue("in_game_id");
 
+        // Validate the in game id
+        if (!/^\d+$/.test(inGameId)) {
+          await modalSubmit.reply({
+            content: "In-Game ID must contain only numbers.",
+            ephemeral: true
+          });
+          return;
+        }
+
         // Check if a team with this name already exists.
         const existingTeam = await storage.getTeamByName(teamName);
         if (existingTeam) {
@@ -178,6 +187,15 @@ export function registerCommands(storage: IStorage) {
         });
         const teamName = modalSubmit.fields.getTextInputValue("team_name");
         const inGameId = modalSubmit.fields.getTextInputValue("in_game_id");
+
+        // Validate the in game id
+        if (!/^\d+$/.test(inGameId)) {
+          await modalSubmit.reply({
+            content: "In-Game ID must contain only numbers.",
+            ephemeral: true
+          });
+          return;
+        }
 
         // Check if the team exists.
         const team = await storage.getTeamByName(teamName);
@@ -276,7 +294,90 @@ export function registerCommands(storage: IStorage) {
         });
         const selectedDate = modalSubmit.fields.getTextInputValue("custom_date");
         const selectedTime = modalSubmit.fields.getTextInputValue("custom_time");
-        const numberOfGames = parseInt(modalSubmit.fields.getTextInputValue("games_input"), 10);
+        const gamesInputValue = parseInt(modalSubmit.fields.getTextInputValue("games_input"), 10);
+
+        // Validate date format (DD-MM)
+        if (!/^\d{2}-\d{2}$/.test(selectedDate)) {
+          await modalSubmit.reply({
+            content: "Date must be in DD-MM format (e.g. 25-12).",
+            ephemeral: true
+          });
+          return;
+        }
+        const [dayStr, monthStr] = selectedDate.split("-");
+        const day = parseInt(dayStr, 10);
+        const month = parseInt(monthStr, 10);
+        if (month < 1 || month > 12) {
+          await modalSubmit.reply({
+            content: "Month must be between 1 and 12.",
+            ephemeral: true
+          });
+          return;
+        }
+        if (day < 1 ||day > 31) {
+          await modalSubmit.reply({
+            content: "Day must be between 1 and 31.",
+            ephemeral: true
+          });
+          return;
+        }
+        // Handle month-specific limits
+        if ((month === 4 || month === 6 || month === 9 || month === 11) && day > 30) {
+          await modalSubmit.reply({
+            content: "The selected month only has 30 days.",
+            ephemeral: true
+          });
+          return;
+        }
+        if (month === 2) {
+          // For February, determine allowed days based on leap year.
+          const currentYear = new Date().getFullYear();
+          const isLeap = (currentYear % 4 === 0 && currentYear % 100 !== 0) || (currentYear % 400 === 0);
+          const maxFebruaryDay = isLeap ? 29 : 28;
+          if (day > maxFebruaryDay) {
+            await modalSubmit.reply({
+              content: `February in ${currentYear} only has ${maxFebruaryDay} days.`,
+              ephemeral: true
+            });
+            return;
+          }
+        }
+
+        // Validate time format (HH:MM)
+        if (!/^\d{2}:\d{2}$/.test(selectedTime)) {
+          await modalSubmit.reply({
+            content: "Time must be in HH:MM format (e.g. 21:30).",
+            ephemeral: true
+          });
+          return;
+        }
+        const [hourStr, minuteStr] = selectedTime.split(":");
+        const hour = parseInt(hourStr, 10);
+        const minute = parseInt(minuteStr, 10);
+        if (hour < 0 ||hour > 23) {
+          await modalSubmit.reply({
+            content : "Hour must be between 0 and 23.",
+            ephemeral: true
+          });
+          return;
+        }
+        if (minute < 0 ||minute > 59) {
+          await modalSubmit.reply({
+            content: "Minute must be between 0 and 59.",
+            ephemeral: true
+          });
+          return;
+        }
+
+        // Validate number of games is numeric.
+        if (!/^\d+$/.test(gamesInputValue)) {
+          await modalSubmit.reply({
+            content: "Number of games must be a valid number.",
+            ephemeral: true
+          });
+          return;
+        }
+        const numberOfGames = parseInt(gamesInputValue, 10);
 
         // Create the scrim with the provided values.
         const scrim = await storage.createScrim({
@@ -287,7 +388,7 @@ export function registerCommands(storage: IStorage) {
           games: numberOfGames,
         });
         await modalSubmit.reply({
-          content: `Scrim scheduled for ${selectedDate} at ${selectedTime} (ID: ${scrim.id}) with ${numberOfGames} games.`,
+          content: `Scrim scheduled for ${selectedDate} at ${selectedTime} with ${numberOfGames} games.`,
           ephemeral: true,
         });
       } catch (err) {
