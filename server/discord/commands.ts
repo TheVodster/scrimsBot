@@ -258,9 +258,9 @@ export function registerCommands(storage: IStorage) {
 
       const dateInput = new TextInputBuilder()
           .setCustomId("custom_date")
-          .setLabel("Enter Date (DD-MM)")
+          .setLabel("Enter Date (DD. MM.)")
           .setStyle(TextInputStyle.Short)
-          .setPlaceholder("e.g. 25-12")
+          .setPlaceholder("e.g. 23. 6.")
           .setRequired(true);
 
       const timeInput = new TextInputBuilder()
@@ -296,15 +296,15 @@ export function registerCommands(storage: IStorage) {
         const selectedTime = modalSubmit.fields.getTextInputValue("custom_time");
         const gamesInputValue = parseInt(modalSubmit.fields.getTextInputValue("games_input"), 10);
 
-        // Validate date format (DD-MM)
-        if (!/^\d{2}-\d{2}$/.test(selectedDate)) {
+        // Validate date format (d. m. or dd. mm.)
+        if (!/^\d{1,2}\. \d{1,2}\.$/.test(selectedDate)) {
           await modalSubmit.reply({
-            content: "Date must be in DD-MM format (e.g. 25-12).",
+            content: "Date must be in d. m. or dd. mm. format (e.g. 5. 5. or 25. 12.).",
             ephemeral: true
           });
           return;
         }
-        const [dayStr, monthStr] = selectedDate.split("-");
+        const [dayStr, monthStr] = selectedDate.split(".");
         const day = parseInt(dayStr, 10);
         const month = parseInt(monthStr, 10);
         if (month < 1 || month > 12) {
@@ -379,16 +379,19 @@ export function registerCommands(storage: IStorage) {
         }
         const numberOfGames = parseInt(gamesInputValue, 10);
 
+        const currentYear = new Date().getFullYear();
+        const formattedDate = `${currentYear}-${month.toString().padStart(2, "0")}-${day.toString().padStart(2, "0")}`;
+
         // Create the scrim with the provided values.
         const scrim = await storage.createScrim({
           team1Id: member.teamId,
-          date: selectedDate,
+          date: formattedDate,
           time: selectedTime,
           status: "open",
           games: numberOfGames,
         });
         await modalSubmit.reply({
-          content: `Scrim scheduled for ${selectedDate} at ${selectedTime} with ${numberOfGames} games.`,
+          content: `Scrim scheduled for ${formattedDate} at ${selectedTime} with ${numberOfGames} games.`,
           ephemeral: true,
         });
       } catch (err) {
