@@ -184,7 +184,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       handleError(err as Error, res);
     }
   });
-  
+
+  // Team member update route
+  app.put("/api/team-members/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const updatedMember = await storage.updateTeamMember(id, req.body);
+      if (!updatedMember) {
+        return res.status(404).json({ message: "Team member not found" });
+      }
+      const result = await storage.getTeamsWithMembers();
+      broadcastUpdate("teams-updated", result);
+      res.json(updatedMember);
+    } catch (err) {
+      handleError(err as Error, res);
+    }
+  });
+
   app.delete("/api/team-members/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);

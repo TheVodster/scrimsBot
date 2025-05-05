@@ -129,9 +129,24 @@ export class MemStorage implements IStorage {
 
   async updateTeamMember(id: number, memberUpdate: Partial<TeamMember>): Promise<TeamMember | undefined> {
     const member = this.teamMembers.get(id);
-    if (!member) return undefined;
-    
+    if (!member) {
+      console.error(`Member with ID ${id} not found`);
+      return undefined;
+    }
+
+    // If setting a new captain, clear any existing captain in the same team
+    if (memberUpdate.isCaptain === true) {
+      for (const [key, m] of this.teamMembers.entries()) {
+        if (m.teamId === member.teamId && m.isCaptain && m.id !== id) {
+          const updatedOther = { ...m, isCaptain: false };
+          console.log(`Clearing captain status for member ${m.id}:`, m, "=>", updatedOther);
+          this.teamMembers.set(key, updatedOther);
+        }
+      }
+    }
+
     const updatedMember: TeamMember = { ...member, ...memberUpdate };
+    console.log(`Updating member ${id} from`, member, 'to', updatedMember);
     this.teamMembers.set(id, updatedMember);
     return updatedMember;
   }
