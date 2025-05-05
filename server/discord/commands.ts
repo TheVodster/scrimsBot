@@ -224,7 +224,7 @@ export function registerCommands(storage: IStorage) {
         return;
       }
 
-      const scrims = await storage.getOpenScrims();
+      let scrims = await storage.getOpenScrims();
       if (!scrims || scrims.length === 0) {
         await interaction.reply({
           content: "No available scrims to join.",
@@ -232,6 +232,20 @@ export function registerCommands(storage: IStorage) {
         });
         return;
       }
+
+      // Sort scrims chronologically using DD-MM format
+      scrims.sort((a, b) => {
+          const [dayA, monthA] = a.date.split("-").map(Number);
+          const [dayB, monthB] = b.date.split("-").map(Number);
+          if (monthA !== monthB) return monthA - monthB;
+          if (dayA !== dayB) return dayA - dayB;
+
+          const [hourA, minuteA] = a.time.split(":").map(Number);
+          const [hourB, minuteB] = b.time.split(":").map(Number);
+
+          if (hourA !== hourB) return hourA - hourB;
+          return minuteA - minuteB;
+      });
 
       const options = scrims.map(scrim => {
         return {
