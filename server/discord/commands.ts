@@ -233,13 +233,15 @@ export function registerCommands(storage: IStorage) {
         return;
       }
 
-      const options = scrims.map(scrim => {
+      const options = await Promise.all(scrims.map(async scrim => {
+        const team = await storage.getTeam(scrim.team1Id);
+        const teamName = team?.name || "Unknown team";
         return {
-          label: `Scrim ${scrim.id}`,
+          label: `Scrim vs ${teamName}`,
           description: `${scrim.date} at ${scrim.time}`,
           value: scrim.id.toString()
         };
-      });
+      }));
 
       const scrimSelect = new StringSelectMenuBuilder()
           .setCustomId("select_scrim")
