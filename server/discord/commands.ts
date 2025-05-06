@@ -16,6 +16,7 @@ import {
   Routes
 } from "discord.js";
 import { IStorage } from "../storage";
+import { handleScrimAccepted } from './scrimThread.ts'
 
 const applicationID: string = process.env.APPLICATION_ID!;
 
@@ -424,12 +425,17 @@ export function registerCommands(storage: IStorage) {
         return;
       }
 
+      function formatScrimDate(dateStr: string): string {
+        const [year, month, day] = dateStr.split("-");
+        return `${day}.${month}.${year}`;
+      }
+
       const options = await Promise.all(scrims.map(async scrim => {
         const team = await storage.getTeam(scrim.team1Id);
         const teamName = team?.name || "Unknown team";
         return {
           label: `Scrim vs ${teamName}`,
-          description: `${scrim.date} at ${scrim.time}`,
+          description: `${formatScrimDate(scrim.date)} at ${scrim.time}`,
           value: scrim.id.toString()
         };
       }));
@@ -484,6 +490,18 @@ export function registerCommands(storage: IStorage) {
           content: `Team "${team2?.name}" has joined the scrim against "${team1?.name}" scheduled for ${scrim.date} at ${scrim.time}!`,
           components: []
         });
+
+        await handleScrimAccepted(interaction, {
+          id: scrim.id,
+          date: scrim.date,
+          time: scrim.time,
+          team1CaptainId: team1.captainDiscordId,
+          team2CaptainId: team2.captainDiscordId,
+          team1Name: team1.name,
+          team2Name: team2.name,
+          numberOfGames: scrim.games,
+        })
+
       } catch (err) {
         await interaction.editReply({
           content: "No selection was made in time.",

@@ -182,8 +182,7 @@ export class MemStorage implements IStorage {
     return Array.from(this.scrims.values()).filter(scrim => {
       if (scrim.status !== "open") return false;
       // Convert scrim.date (in "DD-MM" format) to a full date using the current year
-      const [day, month] = scrim.date.split("-");
-      const year = now.getFullYear();
+      const [year, day, month] = scrim.date.split("-");
       const scrimDateTime = new Date(`${year}-${month}-${day}T${scrim.time}:00`);
       return scrimDateTime >= threshold;
     });
