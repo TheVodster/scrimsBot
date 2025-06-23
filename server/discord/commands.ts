@@ -540,7 +540,11 @@ export function registerCommands(storage: IStorage) {
 
     "dashboard": async (interaction: ChatInputCommandInteraction) => {
       if (!interaction.memberPermissions?.has(PermissionsBitField.Flags.Administrator)) {
-        return interaction.reply({content: "You do not have permission to use this command.", ephemeral: true});
+        await interaction.reply({
+          content: "You do not have permission to use this command.",
+          ephemeral: true
+        });
+        return;
       }
 
       const cfg = readConfig();
