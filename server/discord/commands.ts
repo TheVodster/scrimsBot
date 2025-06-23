@@ -1,4 +1,7 @@
 import 'dotenv/config';
+import { fileURLToPath } from "url";
+import path from "path";
+import fs from "fs";
 import {
   ChatInputCommandInteraction,
   ButtonBuilder,
@@ -12,6 +15,10 @@ import {
   StringSelectMenuBuilder,
   CommandInteraction,
   SlashCommandBuilder,
+  ChannelSelectMenuBuilder,
+  RoleSelectMenuBuilder,
+  ComponentType,
+  PermissionsBitField,
   REST,
   Routes
 } from "discord.js";
@@ -19,6 +26,27 @@ import { IStorage } from "../storage";
 import { handleScrimAccepted } from './scrimThread.ts'
 
 const applicationID: string = process.env.APPLICATION_ID!;
+
+const CONFIG_URL = new URL("../config.json", import.meta.url);
+
+type Config = {
+    scrimThreadChannelId: string | null;
+    adminRoleId: string | null;
+}
+
+export function readConfig(): Config {
+  return JSON.parse(
+    fs.readFileSync(CONFIG_URL, "utf-8")
+    ) as Config;
+}
+
+export function writeConfig(cfg: Config): void {
+  fs.writeFileSync(
+    CONFIG_URL,
+    JSON.stringify(cfg, null, 2),
+    "utf-8"
+  );
+}
 
 function formatDate(dt: Date): string {
   const day = dt.getDate().toString().padStart(2, "0");
@@ -295,7 +323,7 @@ export function registerCommands(storage: IStorage) {
         });
         const selectedDate = modalSubmit.fields.getTextInputValue("custom_date");
         const selectedTime = modalSubmit.fields.getTextInputValue("custom_time");
-        const gamesInputValue = parseInt(modalSubmit.fields.getTextInputValue("games_input"), 10);
+        const gamesInputValue = modalSubmit.fields.getTextInputValue("games_input");
 
         // Validate date format (d. m. or dd. mm.)
         if (!/^\d{1,2}\. \d{1,2}\.$/.test(selectedDate)) {
@@ -487,7 +515,7 @@ export function registerCommands(storage: IStorage) {
         const team1 = await storage.getTeam(scrim.team1Id);
         const team2 = await storage.getTeam(member.teamId);
         await selection.update({
-          content: `Team "${team2?.name}" has joined the scrim against "${team1?.name}" scheduled for ${scrim.date} at ${scrim.time}!`,
+          content: `Team "${team2?.name ?? "Unknown"}" has joined the scrim against "${team1?.name ?? "Unknown"}" scheduled for ${scrim.date} at ${scrim.time}!`,
           components: []
         });
 
@@ -495,10 +523,10 @@ export function registerCommands(storage: IStorage) {
           id: scrim.id,
           date: scrim.date,
           time: scrim.time,
-          team1CaptainId: team1.captainDiscordId,
-          team2CaptainId: team2.captainDiscordId,
-          team1Name: team1.name,
-          team2Name: team2.name,
+          team1CaptainId: team1?.captainDiscordId ?? "",
+          team2CaptainId: team2?.captainDiscordId ?? "",
+          team1Name: team1?.name ?? "",
+          team2Name: team2?.name ?? "",
           numberOfGames: scrim.games,
         })
 
@@ -508,7 +536,76 @@ export function registerCommands(storage: IStorage) {
           components: []
         });
       }
-    }
+    },
+
+    "dashboard": async (interaction: ChatInputCommandInteraction) => {
+      if (!interaction.memberPermissions?.has(PermissionsBitField.Flags.Administrator)) {
+        return interaction.reply({content: "You do not have permission to use this command.", ephemeral: true});
+      }
+
+      const cfg = readConfig();
+      const embed = new EmbedBuilder()
+          .setTitle("Scrim Bot Dashboard")
+          .setDescription(`**Current settings:**\n• Scrim-thread channel: ${cfg.scrimThreadChannelId ? `<#${cfg.scrimThreadChannelId}>` : "_not set_"}\n• Admin role: ${cfg.adminRoleId ? `<@&${cfg.adminRoleId}>` : "_not set_"}\n\nSelect a channel or role below to update.`);
+
+      const channelMenu = new ChannelSelectMenuBuilder()
+          .setCustomId("dashboard_channel")
+          .setPlaceholder("Selct a text channel")
+          .addChannelTypes(/* only text channels */ [0 /* GUILD_TEXT */])
+          .setMinValues(1)
+          .setMaxValues(1);
+
+      const roleMenu = new RoleSelectMenuBuilder()
+          .setCustomId("dashboard_role")
+          .setPlaceholder("Select the admin role")
+          .setMinValues(1)
+          .setMaxValues(1);
+
+      const row1 = new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(channelMenu);
+      const row2 = new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(roleMenu);
+
+      // send ephemeral dashboard and fetch the message
+      await interaction.reply({
+        embeds: [embed],
+        components: [row1, row2],
+        ephemeral: true,
+        fetchReply: true,
+      });
+      const msg = await interaction.fetchReply(); // Message instance
+      
+
+      // collector for either select menu, 2 minutes
+      const collector = msg.createMessageComponentCollector({
+        time: 120_000,
+        filter: i => i.user.id === interaction.user.id
+      });
+
+      collector.on("collect", async i => {
+        // only the command-invoker can pick
+        if (i.user.id !== interaction.user.id)
+          return i.reply({ content:"Not for you", ephemeral: true });
+      
+        // update the config
+        if (i.isChannelSelectMenu() && i.customId === "dashboard_channel") {
+          cfg.scrimThreadChannelId = i.values[0];
+          writeConfig(cfg);
+        } else if (i.isRoleSelectMenu() && i.customId === "dashboard_role") {
+          cfg.adminRoleId = i.values[0];
+          writeConfig(cfg);
+        } else {
+          return;
+        }
+      
+        // rebuild the embed with new settings
+        const updatedEmbed = EmbedBuilder.from(embed).setDescription(`
+      **Settings updated!**
+      • Scrim-thread channel: ${cfg.scrimThreadChannelId ? `<#${cfg.scrimThreadChannelId}>` : "_not set_"}
+      • Admin role: ${cfg.adminRoleId ? `<@&${cfg.adminRoleId}>` : "_not set_"}
+        `.trim());
+        
+        await i.update({ embeds: [updatedEmbed], components: [row1, row2] });
+      });
+    },
   };
 
   if (process.env.REGISTER_COMMANDS === "true" && process.env.DISCORD_BOT_TOKEN && process.env.APPLICATION_ID) {
@@ -527,7 +624,11 @@ export function registerCommands(storage: IStorage) {
 
       new SlashCommandBuilder()
         .setName("scrims")
-        .setDescription("Display currently available scrims to join.")
+        .setDescription("Display currently available scrims to join."),
+
+      new SlashCommandBuilder()
+          .setName("dashboard")
+          .setDescription("Open the admin dashboard to set the scrim thread channel and admin role."),
     ];
 
     const rest = new REST().setToken(process.env.DISCORD_BOT_TOKEN);

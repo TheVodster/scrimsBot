@@ -9,6 +9,7 @@ import {
 import { ZodError } from "zod";
 import { WebSocketServer } from "ws";
 import { setupBot } from "./discord/bot";
+import 'dotenv/config';
 
 export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);

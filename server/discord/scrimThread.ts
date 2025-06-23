@@ -1,3 +1,5 @@
+import fs from "fs";
+import path from "path";
 import {
     ActionRowBuilder,
     ButtonBuilder,
@@ -10,6 +12,13 @@ import {
     EmbedBuilder,
     ChannelType,
 } from "discord.js";
+
+const CONFIG_URL = new URL("../config.json", import.meta.url);
+
+const cfg = JSON.parse(fs.readFileSync(CONFIG_URL, "utf-8")) as {
+    scrimThreadChannelId: string;
+    adminRoleId: string;
+};
 
 // This function creates a thread, sends messages and sets up a button collector.
 // Make sure you have SCRIM_THREAD_CHANNEL_ID and ADMIN_ROLE_ID in your environment.
@@ -26,8 +35,8 @@ export async function handleScrimAccepted(
         numberOfGames: number;
     }
 ) {
-    const channel = interaction.guild?.channels.cache.get(process.env.SCRIM_THREAD_CHANNEL_ID!) as TextChannel;
-    if (!channel) return;
+    const channel = interaction.guild?.channels.cache.get(cfg.scrimThreadChannelId) as TextChannel;
+    if (!channel) throw new Error("Scrim thread channel not set")
 
     // Create a private thread so that only added members have access.
     const thread: ThreadChannel = await channel.threads.create({
@@ -56,7 +65,7 @@ export async function handleScrimAccepted(
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(lockButton);
 
     // Send the initial message.
-    const adminRoleId = process.env.ADMIN_ROLE_ID!;
+    const adminRoleId = cfg.adminRoleId;
     await thread.send({
         content: `<@&${adminRoleId}>`,
         embeds: [embed],
