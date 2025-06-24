@@ -144,25 +144,32 @@ export default function TeamModal({ team, onClose }: TeamModalProps) {
       // console.log(data.members);
 
       for (const member of data.members) {
-        let response;
         if (member.id) {
-          response = await apiRequest("PUT", `/api/team-members/${member.id}`, {
+          await apiRequest("PUT", `/api/team-members/${member.id}`, {
             discordId: member.discordId,
             username: member.username,
             inGameId: member.inGameId,
-            isCaptain: member.isCaptain,
+            isCaptain: !!member.isCaptain,
           });
         } else {
-          response = await apiRequest("POST", "/api/team-members", {
-            teamId: team?.id,
+          await apiRequest("POST", "/api/team-members", {
+            teamId: team!.id,
             discordId: member.discordId,
             username: member.username,
             inGameId: member.inGameId,
-            isCaptain: member.isCaptain,
+            isCaptain: !!member.isCaptain,
           });
         }
         // console.log("Member update / creation response: ", response);
       }
+      const originalIds = (team!.members || []).map((m) => m.id!);
+      const newIds = data.members.filter((m) => m.id).map((m) => m.id!);
+      const toDelete = originalIds.filter((id) => !newIds.includes(id));
+
+      for (const id of toDelete) {
+        await apiRequest('DELETE', `/api/team-members/${id}`);
+      }
+
     },
     onSuccess: () => {
       queryClient.invalidateQueries({queryKey: ["/api/teams"]});
