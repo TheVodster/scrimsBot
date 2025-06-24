@@ -18,6 +18,7 @@ const CONFIG_URL = new URL("../config.json", import.meta.url);
 const cfg = JSON.parse(fs.readFileSync(CONFIG_URL, "utf-8")) as {
     scrimThreadChannelId: string;
     adminRoleId: string;
+    teamCategoryId: string;
 };
 
 // This function creates a thread, sends messages and sets up a button collector.

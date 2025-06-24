@@ -9,6 +9,7 @@ export const teams = pgTable("teams", {
   captainDiscordId: text("captain_discord_id").notNull(),
   captainUsername: text("captain_username").notNull(),
   captainInGameId: text("captain_in_game_id").notNull(),
+  channelId: text("channel_id").notNull(),
 });
 
 export const insertTeamSchema = createInsertSchema(teams).omit({

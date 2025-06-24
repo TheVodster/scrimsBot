@@ -57,7 +57,7 @@ export class MemStorage implements IStorage {
   // Team operations
   async createTeam(team: InsertTeam): Promise<Team> {
     const id = this.teamIdCounter++;
-    const newTeam: Team = { ...team, id };
+    const newTeam: Team = { ...team, id, channelId: "" };
     this.teams.set(id, newTeam);
     return newTeam;
   }
@@ -106,7 +106,7 @@ export class MemStorage implements IStorage {
   // Team member operations
   async createTeamMember(member: InsertTeamMember): Promise<TeamMember> {
     const id = this.memberIdCounter++;
-    const newMember: TeamMember = { ...member, id };
+    const newMember: TeamMember = { ...member, id, isCaptain: member.isCaptain ?? false };
     this.teamMembers.set(id, newMember);
     return newMember;
   }
@@ -161,6 +161,9 @@ export class MemStorage implements IStorage {
     const newScrim: Scrim = { 
       ...scrim, 
       id, 
+      games: scrim.games ?? 0, // Provide a default value if games is undefined
+      team2Id: scrim.team2Id ?? null, // Ensure team2Id is always number|null
+      status: scrim.status ?? "open", // Provide a default value if status is undefined
       createdAt: new Date()
     };
     this.scrims.set(id, newScrim);

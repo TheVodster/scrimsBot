@@ -20,10 +20,12 @@ import {
   ComponentType,
   PermissionsBitField,
   REST,
-  Routes
+  Routes,
+  ChannelType
 } from "discord.js";
 import { IStorage } from "../storage";
 import { handleScrimAccepted } from './scrimThread.ts'
+import { ApplyNotNullMapToJoins } from 'drizzle-orm/query-builders/select.types';
 
 const applicationID: string = process.env.APPLICATION_ID!;
 
@@ -32,6 +34,7 @@ const CONFIG_URL = new URL("../config.json", import.meta.url);
 type Config = {
     scrimThreadChannelId: string | null;
     adminRoleId: string | null;
+    teamCategoryId: string | null;
 }
 
 export function readConfig(): Config {
@@ -154,7 +157,8 @@ export function registerCommands(storage: IStorage) {
           name: teamName,
           captainDiscordId: interaction.user.id,
           captainUsername: interaction.user.tag,
-          captainInGameId: inGameId
+          captainInGameId: inGameId,
+          channelId: ""
         });
 
         await storage.createTeamMember({
@@ -164,6 +168,49 @@ export function registerCommands(storage: IStorage) {
           inGameId: inGameId,
           isCaptain: true
         });
+
+        const guild = interaction.guild;
+        const cfg = readConfig();
+
+        // make sure the admin has set the category for team channels
+        if (!cfg.teamCategoryId) {
+          await modalSubmit.reply({
+            content: "The team channels category is not set in the admin dashboard.",
+            ephemeral: true
+          });
+          return;
+        }
+
+        // create the team channel
+        const channel = await guild!.channels.create({
+          name: teamName.toLowerCase().replace(/\s+/g, "-"),
+          type: ChannelType.GuildText,
+          parent: cfg.teamCategoryId,
+          permissionOverwrites: [
+            // deny @everyone
+            { id: guild!.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+            // allow team captain
+            { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel] },
+            // allow admins
+            { id: cfg.adminRoleId!,    allow: [PermissionsBitField.Flags.ViewChannel] },
+          ]
+        });
+
+        // store channel id in DB so we can fetch it in join-team
+        await storage.updateTeam(team.id, { channelId: channel.id });
+
+        // send a welcome message in the team channel
+        await channel.send({
+          embeds: [
+            new EmbedBuilder()
+              .setTitle("Welcome, Captain!")
+              .setDescription(
+                `Hello <@${interaction.user.id}> — this is your private team channel for **${teamName}**.\n\n` +
+                `Feel free to invite your teammates with /join-team, and start chatting here!`
+              )
+              .setColor(0x00AE86)
+          ]
+        })
 
         await modalSubmit.reply({
           content: `Team \`${teamName}\` has been created with <@${interaction.user.id}> as the captain!`,
@@ -255,6 +302,22 @@ export function registerCommands(storage: IStorage) {
           inGameId: inGameId,
           isCaptain: false
         });
+
+        if (team?.channelId) {
+          const channel = await interaction.guild!.channels.fetch(team.channelId);
+          if (channel?.isTextBased() && channel.type === ChannelType.GuildText) {
+            await channel.permissionOverwrites.edit(interaction.user.id, {
+              ViewChannel: true,
+              SendMessages: true
+            });
+
+            // welcome the new members
+            await channel.send({
+              content: `Welcome <@${interaction.user.id}> to **${teamName}**!`,
+              allowedMentions: { users: [interaction.user.id] }
+            });
+          }
+        }
 
         await modalSubmit.reply({
           content: `You have joined team \`${teamName}\`!`,
@@ -550,12 +613,16 @@ export function registerCommands(storage: IStorage) {
       const cfg = readConfig();
       const embed = new EmbedBuilder()
           .setTitle("Scrim Bot Dashboard")
-          .setDescription(`**Current settings:**\n• Scrim-thread channel: ${cfg.scrimThreadChannelId ? `<#${cfg.scrimThreadChannelId}>` : "_not set_"}\n• Admin role: ${cfg.adminRoleId ? `<@&${cfg.adminRoleId}>` : "_not set_"}\n\nSelect a channel or role below to update.`);
+          .setDescription(`**Current settings:**\n
+            • Scrim-thread channel: ${cfg.scrimThreadChannelId ? `<#${cfg.scrimThreadChannelId}>` : "_not set_"}\n
+            • Admin role: ${cfg.adminRoleId ? `<@&${cfg.adminRoleId}>` : "_not set_"}\n
+            • Team channels category: ${cfg.teamCategoryId ? `<#${cfg.teamCategoryId}>` : "_not set_"}\n\n
+            Select a channel or role below to update.`);
 
       const channelMenu = new ChannelSelectMenuBuilder()
           .setCustomId("dashboard_channel")
           .setPlaceholder("Selct a text channel")
-          .addChannelTypes(/* only text channels */ [0 /* GUILD_TEXT */])
+          .addChannelTypes(ChannelType.GuildText) // only text channels
           .setMinValues(1)
           .setMaxValues(1);
 
@@ -565,13 +632,21 @@ export function registerCommands(storage: IStorage) {
           .setMinValues(1)
           .setMaxValues(1);
 
+      const categoryMenu = new ChannelSelectMenuBuilder()
+          .setCustomId("dashboard_category")
+          .setPlaceholder("Select the category for team channels")
+          .addChannelTypes(ChannelType.GuildCategory) // only categories
+          .setMinValues(1)
+          .setMaxValues(1);
+
       const row1 = new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(channelMenu);
       const row2 = new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(roleMenu);
+      const row3 = new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(categoryMenu);
 
       // send ephemeral dashboard and fetch the message
       await interaction.reply({
         embeds: [embed],
-        components: [row1, row2],
+        components: [row1, row2, row3],
         ephemeral: true,
         fetchReply: true,
       });
@@ -580,14 +655,14 @@ export function registerCommands(storage: IStorage) {
 
       // collector for either select menu, 2 minutes
       const collector = msg.createMessageComponentCollector({
-        time: 120_000,
+        time: 30_000,
         filter: i => i.user.id === interaction.user.id
       });
 
       collector.on("collect", async i => {
         // only the command-invoker can pick
         if (i.user.id !== interaction.user.id)
-          return i.reply({ content:"Not for you", ephemeral: true });
+          return i.reply({ content:"You aren't allowed to use this command", ephemeral: true });
       
         // update the config
         if (i.isChannelSelectMenu() && i.customId === "dashboard_channel") {
@@ -595,6 +670,9 @@ export function registerCommands(storage: IStorage) {
           writeConfig(cfg);
         } else if (i.isRoleSelectMenu() && i.customId === "dashboard_role") {
           cfg.adminRoleId = i.values[0];
+          writeConfig(cfg);
+        } else if (i.isChannelSelectMenu() && i.customId === "dashboard_category") {
+          cfg.teamCategoryId = i.values[0];
           writeConfig(cfg);
         } else {
           return;
@@ -605,9 +683,10 @@ export function registerCommands(storage: IStorage) {
       **Settings updated!**
       • Scrim-thread channel: ${cfg.scrimThreadChannelId ? `<#${cfg.scrimThreadChannelId}>` : "_not set_"}
       • Admin role: ${cfg.adminRoleId ? `<@&${cfg.adminRoleId}>` : "_not set_"}
+      • Scrim-thread channel: ${cfg.teamCategoryId ? `<#${cfg.teamCategoryId}>` : "_not set_"}
         `.trim());
         
-        await i.update({ embeds: [updatedEmbed], components: [row1, row2] });
+        await i.update({ embeds: [updatedEmbed], components: [row1, row2, row3] });
       });
     },
   };
