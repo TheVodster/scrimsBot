@@ -1,7 +1,5 @@
 import 'dotenv/config';
-import { fileURLToPath } from "url";
-import path from "path";
-import fs from "fs";
+import fs, { write } from "fs";
 import {
   ChatInputCommandInteraction,
   ButtonBuilder,
@@ -25,7 +23,6 @@ import {
 } from "discord.js";
 import { IStorage } from "../storage";
 import { handleScrimAccepted } from './scrimThread.ts'
-import { ApplyNotNullMapToJoins } from 'drizzle-orm/query-builders/select.types';
 
 const applicationID: string = process.env.APPLICATION_ID!;
 
@@ -35,12 +32,12 @@ type Config = {
     scrimThreadChannelId: string | null;
     adminRoleId: string | null;
     teamCategoryId: string | null;
+    captainRoleId: string | null;
 }
 
 export function readConfig(): Config {
   return JSON.parse(
-    fs.readFileSync(CONFIG_URL, "utf-8")
-    ) as Config;
+    fs.readFileSync(CONFIG_URL, "utf-8")) as Config;
 }
 
 export function writeConfig(cfg: Config): void {
@@ -49,35 +46,6 @@ export function writeConfig(cfg: Config): void {
     JSON.stringify(cfg, null, 2),
     "utf-8"
   );
-}
-
-function formatDate(dt: Date): string {
-  const day = dt.getDate().toString().padStart(2, "0");
-  const month = (dt.getMonth() + 1).toString().padStart(2, "0");
-  return `${day}-${month}`;
-}
-
-// Helper to wait for a modal submission with a filter.
-function waitForModalSubmit(
-  client: any,
-  customId: string,
-  userId: string,
-  time: number = 60000
-): Promise<ModalSubmitInteraction> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      client.removeListener("interactionCreate", handler);
-      reject(new Error("Modal submission timed out."));
-    }, time);
-    const handler = (i: any) => {
-      if (i.isModalSubmit() && i.customId === customId && i.user.id === userId) {
-        clearTimeout(timer);
-        client.removeListener("interactionCreate", handler);
-        resolve(i);
-      }
-    };
-    client.on("interactionCreate", handler);
-  });
 }
 
 export function registerCommands(storage: IStorage) {
@@ -89,247 +57,278 @@ export function registerCommands(storage: IStorage) {
       const teamModal = new ModalBuilder()
           .setCustomId("createTeamModal")
           .setTitle("Create Team");
-
-      const teamNameInput = new TextInputBuilder()
+      teamModal.addComponents(
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder()
           .setCustomId("team_name")
           .setLabel("Team Name")
           .setStyle(TextInputStyle.Short)
           .setPlaceholder("Enter your team name")
-          .setRequired(true);
-
-      const inGameIdInput = new TextInputBuilder()
+          .setRequired(true)
+        ),
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder()
           .setCustomId("in_game_id")
           .setLabel("In-Game ID")
           .setStyle(TextInputStyle.Short)
           .setPlaceholder("Enter your in-game ID without server ID (e.g. 1234567)")
-          .setRequired(true);
-
-      teamModal.addComponents(
-          new ActionRowBuilder<TextInputBuilder>().addComponents(teamNameInput),
-          new ActionRowBuilder<TextInputBuilder>().addComponents(inGameIdInput)
+          .setRequired(true)
+        )
       );
-
-      // Show the modal to the user.
+      // show the modal to the user.
       await interaction.showModal(teamModal);
 
+      // only catch modal timeout
+      let modalSubmit: ModalSubmitInteraction;
       try {
-        // Wait for the modal submission.
-        const modalSubmit = await interaction.awaitModalSubmit({
-          filter: (i: any) =>
-              i.customId === "createTeamModal" && i.user.id === interaction.user.id,
+        modalSubmit = await interaction.awaitModalSubmit({
+          filter: i =>
+            i.customId === "createTeamModal" && i.user.id === interaction.user.id,
           time: 60000
         });
-        const teamName = modalSubmit.fields.getTextInputValue("team_name");
-        const inGameId = modalSubmit.fields.getTextInputValue("in_game_id");
-
-        // Validate the in game id
-        if (!/^\d+$/.test(inGameId)) {
+      } catch {
+        return void (
+          await interaction.followUp({
+            content: "No submission was made in time.",
+            ephemeral: true
+          })
+        );
+      }
+      
+      // extract and validate
+      const teamName = modalSubmit.fields.getTextInputValue("team_name").trim();
+      const inGameId = modalSubmit.fields.getTextInputValue("in_game_id").trim();
+      if (!/^\d+$/.test(inGameId)) {
+        return void (
           await modalSubmit.reply({
             content: "In-Game ID must contain only numbers.",
-            ephemeral: true
-          });
-          return;
-        }
+            ephemeral: true 
+          })
+        );
+      }
 
-        // Check if a team with this name already exists.
-        const existingTeam = await storage.getTeamByName(teamName);
-        if (existingTeam) {
+      // logic checks
+      if (await storage.getTeamByName(teamName)) {
+        return void (
           await modalSubmit.reply({
             content: `A team named \`${teamName}\` already exists. Please choose a different name.`,
             ephemeral: true
-          });
-          return;
-        }
-
-        // Ensure the user is not already in a team.
-        const existingMember = await storage.getTeamMemberByDiscordId(interaction.user.id);
-        if (existingMember) {
-          const team = await storage.getTeam(existingMember.teamId);
-          await modalSubmit.reply({
-            content: `You are already a member of the team \`${team?.name}\`. Please leave that team first.`,
-            ephemeral: true
-          });
-          return;
-        }
-
-        // Create the team and add the user as captain.
-        const team = await storage.createTeam({
-          name: teamName,
-          captainDiscordId: interaction.user.id,
-          captainUsername: interaction.user.tag,
-          captainInGameId: inGameId,
-          channelId: ""
-        });
-
-        await storage.createTeamMember({
-          teamId: team.id,
-          discordId: interaction.user.id,
-          username: interaction.user.tag,
-          inGameId: inGameId,
-          isCaptain: true
-        });
-
-        const guild = interaction.guild;
-        const cfg = readConfig();
-
-        // make sure the admin has set the category for team channels
-        if (!cfg.teamCategoryId) {
-          await modalSubmit.reply({
-            content: "The team channels category is not set in the admin dashboard.",
-            ephemeral: true
-          });
-          return;
-        }
-
-        // create the team channel
-        const channel = await guild!.channels.create({
-          name: teamName.toLowerCase().replace(/\s+/g, "-"),
-          type: ChannelType.GuildText,
-          parent: cfg.teamCategoryId,
-          permissionOverwrites: [
-            // deny @everyone
-            { id: guild!.id, deny: [PermissionsBitField.Flags.ViewChannel] },
-            // allow team captain
-            { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel] },
-            // allow admins
-            { id: cfg.adminRoleId!,    allow: [PermissionsBitField.Flags.ViewChannel] },
-          ]
-        });
-
-        // store channel id in DB so we can fetch it in join-team
-        await storage.updateTeam(team.id, { channelId: channel.id });
-
-        // send a welcome message in the team channel
-        await channel.send({
-          embeds: [
-            new EmbedBuilder()
-              .setTitle("Welcome, Captain!")
-              .setDescription(
-                `Hello <@${interaction.user.id}> — this is your private team channel for **${teamName}**.\n\n` +
-                `Feel free to invite your teammates with /join-team, and start chatting here!`
-              )
-              .setColor(0x00AE86)
-          ]
-        })
-
-        await modalSubmit.reply({
-          content: `Team \`${teamName}\` has been created with <@${interaction.user.id}> as the captain!`,
-          ephemeral: false
-        });
-      } catch (err) {
-        await interaction.followUp({
-          content: "No submission was made in time.",
-          ephemeral: true
-        });
+          })
+        );
       }
+      const oldMember = await storage.getTeamMemberByDiscordId(interaction.user.id);
+      if (oldMember) {
+        const old = await storage.getTeam(oldMember.teamId);
+        return void (
+          await modalSubmit.reply({
+            content: `You are already a member of the team \`${old?.name}\`. Please leave that team first.`,
+            ephemeral: true
+          })
+        );
+      }
+      
+      // create team and member in storage
+      const team = await storage.createTeam({
+        name: teamName,
+        captainDiscordId: interaction.user.id,
+        captainUsername: interaction.user.tag,
+        captainInGameId: inGameId,
+        channelId: '',
+      });
+      await storage.createTeamMember({
+        teamId: team.id,
+        discordId: interaction.user.id,
+        username: interaction.user.tag,
+        inGameId,
+        isCaptain: true,
+      });
+
+      const guild = interaction.guild!;
+      const cfg = readConfig();
+
+      // create the team scoped role
+      const teamRole = await guild.roles.create({
+        name: teamName,
+        color: "Random",
+        permissions: [],
+        hoist: true,    // make members appear seperately in member list
+        mentionable: true,
+      });
+      const coachRole = guild.roles.cache.find(r => r.name.toLowerCase() === "coach");
+      if (coachRole) {
+        await teamRole.setPosition(coachRole.position - 1);
+      }
+      const captainMember = await guild.members.fetch(interaction.user.id);
+      await captainMember.roles.add(teamRole);
+
+      // assign the configured captain role
+      if (cfg.captainRoleId) {
+        await captainMember.roles.add(cfg.captainRoleId);
+      }
+
+      // verify that the category is set
+      if (!cfg.teamCategoryId) {
+        return void (
+          await modalSubmit.reply({
+            content: "Please ask an admin to set the team channels category via /dashboard first.",
+            ephemeral: true
+          })
+        );
+      }
+
+      // create private text channel under that category
+      const channel = await guild.channels.create({
+        name: teamName.toLowerCase().replace(/\s+/g, '-'),
+        type: ChannelType.GuildText,
+        parent: cfg.teamCategoryId,
+        permissionOverwrites: [
+          { id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+          {
+            id: teamRole.id,
+            allow: [
+              PermissionsBitField.Flags.ViewChannel,
+              PermissionsBitField.Flags.SendMessages,
+            ],
+          },
+          {
+            id: cfg.adminRoleId!,
+            allow: [
+              PermissionsBitField.Flags.ViewChannel,
+              PermissionsBitField.Flags.SendMessages,
+            ],
+          },
+        ],
+      });
+
+      // persist channelId and send welcome embed
+      await storage.updateTeam(team.id, { channelId: channel.id });
+      await channel.send({
+        embeds: [
+          new EmbedBuilder()
+            .setTitle('Welcome, Captain!')
+            .setDescription(
+              `Hello <@${interaction.user.id}> — this is your private team channel for **${teamName}**.\n` +
+                'Invite your teammates with `/join-team` and start collaborating here!'
+            )
+            .setColor(0x00ae86),
+        ],
+      });
+
+      // confirm to user
+      await modalSubmit.reply({
+        content: `Team \`${teamName}\` created! Check out ${channel}.`,
+        ephemeral: false,
+      });
     },
 
     "join-team": async (interaction: CommandInteraction) => {
       if (!interaction.isChatInputCommand()) return;
 
-      // Build the modal for joining a team.
+      // show join modal
       const joinTeamModal = new ModalBuilder()
           .setCustomId("joinTeamModal")
           .setTitle("Join Team");
-
-      const teamNameInput = new TextInputBuilder()
-          .setCustomId("team_name")
-          .setLabel("Team Name")
-          .setStyle(TextInputStyle.Short)
-          .setPlaceholder("Enter the team name")
-          .setRequired(true);
-
-      const inGameIdInput = new TextInputBuilder()
-          .setCustomId("in_game_id")
-          .setLabel("In-Game ID")
-          .setStyle(TextInputStyle.Short)
-          .setPlaceholder("Enter your in-game ID without server ID (e.g. 1234567)")
-          .setRequired(true);
-
       joinTeamModal.addComponents(
-          new ActionRowBuilder<TextInputBuilder>().addComponents(teamNameInput),
-          new ActionRowBuilder<TextInputBuilder>().addComponents(inGameIdInput)
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder()
+            .setCustomId('team_name')
+            .setLabel('Team Name')
+            .setStyle(TextInputStyle.Short)
+            .setPlaceholder("Enter the team name")
+            .setRequired(true)
+        ),
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder()
+            .setCustomId('in_game_id')
+            .setLabel('In-Game ID')
+            .setStyle(TextInputStyle.Short)
+            .setPlaceholder("Enter your in-game ID without server ID (e.g. 1234567)")
+            .setRequired(true)
+        )
       );
-
-      // Show the modal to the user.
       await interaction.showModal(joinTeamModal);
 
+      // await submission
+      let modalSubmit: ModalSubmitInteraction;
       try {
-        // Await modal submission.
-        const modalSubmit = await interaction.awaitModalSubmit({
-          filter: (i: any) =>
+        modalSubmit = await interaction.awaitModalSubmit({
+          filter: i =>
               i.customId === "joinTeamModal" && i.user.id === interaction.user.id,
           time: 60000
         });
-        const teamName = modalSubmit.fields.getTextInputValue("team_name");
-        const inGameId = modalSubmit.fields.getTextInputValue("in_game_id");
+      } catch {
+        return void (
+          await interaction.followUp({
+            content: 'No submission was made in time.',
+            ephemeral: true,
+          })
+        );
+      }
 
-        // Validate the in game id
-        if (!/^\d+$/.test(inGameId)) {
+      // extract and validate
+      const teamName = modalSubmit.fields.getTextInputValue("team_name").trim();
+      const inGameId = modalSubmit.fields.getTextInputValue("in_game_id").trim();
+      if (!/^\d+$/.test(inGameId)) {
+        return void (
           await modalSubmit.reply({
             content: "In-Game ID must contain only numbers.",
             ephemeral: true
-          });
-          return;
-        }
+         })
+        );
+      }
 
-        // Check if the team exists.
-        const team = await storage.getTeamByName(teamName);
-        if (!team) {
+      // lookup team
+      const team = await storage.getTeamByName(teamName);
+      if (!team) {
+        return void (
           await modalSubmit.reply({
             content: `Team \`${teamName}\` does not exist. Please check the team name.`,
             ephemeral: true
-          });
-          return;
-        }
-
-        // Ensure the user is not already in a team.
-        const existingMember = await storage.getTeamMemberByDiscordId(interaction.user.id);
-        if (existingMember) {
-          const existingTeam = await storage.getTeam(existingMember.teamId);
-          await modalSubmit.reply({
-            content: `You are already a member of team \`${existingTeam?.name}\`. Please leave that team first.`,
-            ephemeral: true
-          });
-          return;
-        }
-
-        // Add the user to the team.
-        await storage.createTeamMember({
-          teamId: team.id,
-          discordId: interaction.user.id,
-          username: interaction.user.tag,
-          inGameId: inGameId,
-          isCaptain: false
-        });
-
-        if (team?.channelId) {
-          const channel = await interaction.guild!.channels.fetch(team.channelId);
-          if (channel?.isTextBased() && channel.type === ChannelType.GuildText) {
-            await channel.permissionOverwrites.edit(interaction.user.id, {
-              ViewChannel: true,
-              SendMessages: true
-            });
-
-            // welcome the new members
-            await channel.send({
-              content: `Welcome <@${interaction.user.id}> to **${teamName}**!`,
-              allowedMentions: { users: [interaction.user.id] }
-            });
-          }
-        }
-
-        await modalSubmit.reply({
-          content: `You have joined team \`${teamName}\`!`,
-          ephemeral: true
-        });
-      } catch (err) {
-        await interaction.followUp({
-          content: "No submission was made in time.",
-          ephemeral: true
-        });
-        return;
+          })
+        );
       }
+      const oldMember = await storage.getTeamMemberByDiscordId(interaction.user.id);
+      if (oldMember) {
+        const oldTeam = await storage.getTeam(oldMember.teamId);
+        return void (
+          await modalSubmit.reply({
+            content: `You are already a member of team \`${oldTeam?.name}\`. Please leave that team first.`,
+            ephemeral: true,
+          })
+        );
+      }
+
+      // persist member
+      await storage.createTeamMember({
+        teamId: team.id,
+        discordId: interaction.user.id,
+        username: interaction.user.tag,
+        inGameId,
+        isCaptain: false
+      });
+
+      // assign the team role
+      const guild = interaction.guild!;
+      const member = await guild.members.fetch(interaction.user.id);
+      const role = guild.roles.cache.find(r => r.name === teamName);
+      if (role) {
+        await member.roles.add(role);
+        // welcome the new members
+        const channel = await guild.channels.fetch(team.channelId);
+        if (channel?.isTextBased()) {
+          await channel.send({
+            content: `Welcome <@${interaction.user.id}> to **${teamName}**!`,
+            allowedMentions: { users: [interaction.user.id] }
+          });
+        }
+      } else {
+        console.warn(`Role for team "${team.name}" not found.`);
+      }
+      
+      await modalSubmit.reply({
+        content: `You have successfully joined team \`${teamName}\`. Check out ${guild.channels.cache.get(team.channelId) ?? "the team channel"}.`,
+        ephemeral: true,
+      });
     },
 
     "schedule-scrim": async (interaction: ChatInputCommandInteraction) => {
@@ -607,22 +606,31 @@ export function registerCommands(storage: IStorage) {
           content: "You do not have permission to use this command.",
           ephemeral: true
         });
-        return;
       }
 
       const cfg = readConfig();
       const embed = new EmbedBuilder()
           .setTitle("Scrim Bot Dashboard")
-          .setDescription(`**Current settings:**\n
+          .setDescription(
+            `**Current settings:**\n
             • Scrim-thread channel: ${cfg.scrimThreadChannelId ? `<#${cfg.scrimThreadChannelId}>` : "_not set_"}\n
+            • Team channels category: ${cfg.teamCategoryId ? `<#${cfg.teamCategoryId}>` : "_not set_"}\n
             • Admin role: ${cfg.adminRoleId ? `<@&${cfg.adminRoleId}>` : "_not set_"}\n
-            • Team channels category: ${cfg.teamCategoryId ? `<#${cfg.teamCategoryId}>` : "_not set_"}\n\n
-            Select a channel or role below to update.`);
+            • Captains role:        ${cfg.captainRoleId  ? `<@&${cfg.captainRoleId}>`  : "_not set_"}\n\n
+            Select a channel or role below to update.`.trim());
 
+      // build menus
       const channelMenu = new ChannelSelectMenuBuilder()
           .setCustomId("dashboard_channel")
           .setPlaceholder("Selct a text channel")
-          .addChannelTypes(ChannelType.GuildText) // only text channels
+          .addChannelTypes(ChannelType.GuildText)
+          .setMinValues(1)
+          .setMaxValues(1);
+
+      const categoryMenu = new ChannelSelectMenuBuilder()
+          .setCustomId("dashboard_category")
+          .setPlaceholder("Select the category for team channels")
+          .addChannelTypes(ChannelType.GuildCategory)
           .setMinValues(1)
           .setMaxValues(1);
 
@@ -632,61 +640,65 @@ export function registerCommands(storage: IStorage) {
           .setMinValues(1)
           .setMaxValues(1);
 
-      const categoryMenu = new ChannelSelectMenuBuilder()
-          .setCustomId("dashboard_category")
-          .setPlaceholder("Select the category for team channels")
-          .addChannelTypes(ChannelType.GuildCategory) // only categories
+      const captainRoleMenu = new RoleSelectMenuBuilder()
+          .setCustomId("dashboard_captain_role")
+          .setPlaceholder("Select the captains role")
           .setMinValues(1)
           .setMaxValues(1);
 
-      const row1 = new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(channelMenu);
-      const row2 = new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(roleMenu);
-      const row3 = new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(categoryMenu);
+      const rows = [
+        new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(channelMenu),
+        new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(categoryMenu),
+        new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(roleMenu),
+        new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(captainRoleMenu),
+      ];
+      
+      
 
       // send ephemeral dashboard and fetch the message
       await interaction.reply({
         embeds: [embed],
-        components: [row1, row2, row3],
+        components: rows,
         ephemeral: true,
-        fetchReply: true,
       });
-      const msg = await interaction.fetchReply(); // Message instance
+      const msg = await interaction.fetchReply();
       
 
       // collector for either select menu, 2 minutes
       const collector = msg.createMessageComponentCollector({
+        // componentType: ComponentType.ChannelSelect || ComponentType.RoleSelect,
         time: 30_000,
-        filter: i => i.user.id === interaction.user.id
+        filter: i => i.user.id === interaction.user.id,
       });
 
       collector.on("collect", async i => {
-        // only the command-invoker can pick
         if (i.user.id !== interaction.user.id)
           return i.reply({ content:"You aren't allowed to use this command", ephemeral: true });
       
-        // update the config
-        if (i.isChannelSelectMenu() && i.customId === "dashboard_channel") {
-          cfg.scrimThreadChannelId = i.values[0];
-          writeConfig(cfg);
-        } else if (i.isRoleSelectMenu() && i.customId === "dashboard_role") {
-          cfg.adminRoleId = i.values[0];
-          writeConfig(cfg);
-        } else if (i.isChannelSelectMenu() && i.customId === "dashboard_category") {
-          cfg.teamCategoryId = i.values[0];
-          writeConfig(cfg);
-        } else {
-          return;
+        if (i.isChannelSelectMenu()) {
+          if (i.customId === "dashboard_channel") {
+            cfg.scrimThreadChannelId = i.values[0];
+          } else if (i.customId === "dashboard_category") {
+            cfg.teamCategoryId = i.values[0];
+          }
+        } else if (i.isRoleSelectMenu()) {
+          if (i.customId === "dashboard_role") {
+            cfg.adminRoleId = i.values[0];
+          } else if (i.customId === "dashboard_captain_role") {
+            cfg.captainRoleId = i.values[0];
+          }
         }
+        writeConfig(cfg);
       
-        // rebuild the embed with new settings
         const updatedEmbed = EmbedBuilder.from(embed).setDescription(`
       **Settings updated!**
       • Scrim-thread channel: ${cfg.scrimThreadChannelId ? `<#${cfg.scrimThreadChannelId}>` : "_not set_"}
+      • Team channel category: ${cfg.teamCategoryId ? `<#${cfg.teamCategoryId}>` : "_not set_"}
       • Admin role: ${cfg.adminRoleId ? `<@&${cfg.adminRoleId}>` : "_not set_"}
-      • Scrim-thread channel: ${cfg.teamCategoryId ? `<#${cfg.teamCategoryId}>` : "_not set_"}
+      • Captains role: ${cfg.captainRoleId ? `<@&${cfg.captainRoleId}>` : "_not set_"}
         `.trim());
         
-        await i.update({ embeds: [updatedEmbed], components: [row1, row2, row3] });
+        await i.update({ embeds: [updatedEmbed], components: rows });
       });
     },
   };
@@ -711,7 +723,7 @@ export function registerCommands(storage: IStorage) {
 
       new SlashCommandBuilder()
           .setName("dashboard")
-          .setDescription("Open the admin dashboard to set the scrim thread channel and admin role."),
+          .setDescription("Admin dashboard"),
     ];
 
     const rest = new REST().setToken(process.env.DISCORD_BOT_TOKEN);
