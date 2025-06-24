@@ -9,6 +9,7 @@ import {
 import { ZodError } from "zod";
 import { WebSocketServer } from "ws";
 import { setupBot } from "./discord/bot";
+import { syncTeamRoles, deleteTeamResources } from "./discord/roles";
 import 'dotenv/config';
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -141,6 +142,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const validatedData = insertTeamSchema.partial().parse(req.body);
       const updatedTeam = await storage.updateTeam(id, validatedData);
+      const all = await storage.getTeamsWithMembers();
+      broadcastUpdate("teams-updated", all);
+      
+      try {
+        if (updatedTeam && team) {
+          await syncTeamRoles(updatedTeam, team);
+        } else if (updatedTeam) {
+          await syncTeamRoles(updatedTeam);
+        }
+      } catch(err) {
+        console.error("Failed to sync team roles:", err);
+      }
       
       const result = await storage.getTeamsWithMembers();
       broadcastUpdate("teams-updated", result);
@@ -159,6 +172,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!team) {
         return res.status(404).json({ message: "Team not found" });
       }
+
+      try {
+        await deleteTeamResources(team);
+      } catch (error) {
+        console.error("Error cleaning up Discord resources:", error);
+      }
       
       await storage.deleteTeam(id);
       
@@ -176,6 +195,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const validatedData = insertTeamMemberSchema.parse(req.body);
       const teamMember = await storage.createTeamMember(validatedData);
+      const team = await storage.getTeam(teamMember.teamId)!;
+      await syncTeamRoles(team!);
       
       const result = await storage.getTeamsWithMembers();
       broadcastUpdate("teams-updated", result);
@@ -191,6 +212,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const id = parseInt(req.params.id);
       const updatedMember = await storage.updateTeamMember(id, req.body);
+      const team = await storage.getTeam(updatedMember!.teamId);
+      await syncTeamRoles(team!);
       if (!updatedMember) {
         return res.status(404).json({ message: "Team member not found" });
       }
@@ -210,8 +233,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!member) {
         return res.status(404).json({ message: "Team member not found" });
       }
-      
+      const memberListBefore = await storage.getTeamMembers(member.teamId);
       await storage.deleteTeamMember(id);
+      const teamAfter = await storage.getTeam(member.teamId)!;
+      await syncTeamRoles(teamAfter!, { ...teamAfter!, id: teamAfter!.id });
       
       const result = await storage.getTeamsWithMembers();
       broadcastUpdate("teams-updated", result);

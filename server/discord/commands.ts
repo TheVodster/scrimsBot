@@ -208,7 +208,7 @@ export function registerCommands(storage: IStorage) {
             .setTitle('Welcome, Captain!')
             .setDescription(
               `Hello <@${interaction.user.id}> — this is your private team channel for **${teamName}**.\n` +
-                'Invite your teammates with `/join-team` and start collaborating here!'
+                'Invite your teammates with `/join-team` and start chatting here!'
             )
             .setColor(0x00ae86),
         ],

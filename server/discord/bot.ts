@@ -2,15 +2,20 @@ import { Client, GatewayIntentBits, Events } from "discord.js";
 import { registerCommands } from "./commands";
 import { IStorage } from "../storage";
 
+export let discordClient: Client;
+
 export async function setupBot(token: string, storage: IStorage) {
   // Create a new client instance
   const client = new Client({
     intents: [
       GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildMembers,
       GatewayIntentBits.GuildMessages,
       GatewayIntentBits.MessageContent,
     ],
   });
+
+  discordClient = client;
 
   let commandFunctions = {};
 
