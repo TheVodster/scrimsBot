@@ -608,99 +608,152 @@ export function registerCommands(storage: IStorage) {
         });
       }
 
-      const cfg = readConfig();
-      const embed = new EmbedBuilder()
-          .setTitle("Scrim Bot Dashboard")
-          .setDescription(
+      // initial dashboard embed + buttons
+      const dashEmbed = new EmbedBuilder()
+        .setTitle("🔧 Admin Dashboard")
+        .setDescription("Choose an action:")
+        .setColor(0x5865f2);
+
+      const dashRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId("dashboard_settings")
+          .setLabel("🛠️ Settings")
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId("dashboard_announce")
+          .setLabel("📢 Global Announcement")
+          .setStyle(ButtonStyle.Primary)
+      );
+
+      // send emphemeral dashboard
+      await interaction.reply({
+        embeds: [dashEmbed],
+        components: [dashRow],
+        ephemeral: true,
+        fetchReply: true,
+      });
+      const msg = await interaction.fetchReply();
+
+      // collector for the buttons
+      const collector = msg.createMessageComponentCollector({
+        componentType: ComponentType.Button,
+        time: 30_000,
+        filter: i => i.user.id === interaction.user.id,
+      });
+
+      collector.on("collect", async (btnInt) => {
+        // SETTINGS -> swap into the old select menu UI
+        if (btnInt.customId === "dashboard_settings") {
+          const cfg = readConfig();
+          const settingsEmbed = new EmbedBuilder()
+            .setTitle("🔧 Dashboard Settings")
+            .setDescription(
             `**Current settings:**\n
             • Scrim-thread channel: ${cfg.scrimThreadChannelId ? `<#${cfg.scrimThreadChannelId}>` : "_not set_"}\n
             • Team channels category: ${cfg.teamCategoryId ? `<#${cfg.teamCategoryId}>` : "_not set_"}\n
             • Admin role: ${cfg.adminRoleId ? `<@&${cfg.adminRoleId}>` : "_not set_"}\n
             • Captains role:        ${cfg.captainRoleId  ? `<@&${cfg.captainRoleId}>`  : "_not set_"}\n\n
-            Select a channel or role below to update.`.trim());
+            Select a channel or role below to update.`.trim())
+            .setColor(0x5865f2);
 
-      // build menus
-      const channelMenu = new ChannelSelectMenuBuilder()
+          // build select-menu rows
+          const channelMenu = new ChannelSelectMenuBuilder()
           .setCustomId("dashboard_channel")
-          .setPlaceholder("Selct a text channel")
+          .setPlaceholder("Select a scrim-thread channel")
           .addChannelTypes(ChannelType.GuildText)
           .setMinValues(1)
           .setMaxValues(1);
 
-      const categoryMenu = new ChannelSelectMenuBuilder()
+        const categoryMenu = new ChannelSelectMenuBuilder()
           .setCustomId("dashboard_category")
-          .setPlaceholder("Select the category for team channels")
+          .setPlaceholder("Select the team channels category")
           .addChannelTypes(ChannelType.GuildCategory)
           .setMinValues(1)
           .setMaxValues(1);
 
-      const roleMenu = new RoleSelectMenuBuilder()
+        const adminRoleMenu = new RoleSelectMenuBuilder()
           .setCustomId("dashboard_role")
           .setPlaceholder("Select the admin role")
           .setMinValues(1)
           .setMaxValues(1);
 
-      const captainRoleMenu = new RoleSelectMenuBuilder()
+        const captainRoleMenu = new RoleSelectMenuBuilder()
           .setCustomId("dashboard_captain_role")
           .setPlaceholder("Select the captains role")
           .setMinValues(1)
           .setMaxValues(1);
 
-      const rows = [
-        new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(channelMenu),
-        new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(categoryMenu),
-        new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(roleMenu),
-        new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(captainRoleMenu),
-      ];
-      
-      
+        const rows = [
+          new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(channelMenu),
+          new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(categoryMenu),
+          new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(adminRoleMenu),
+          new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(captainRoleMenu),
+        ];
 
-      // send ephemeral dashboard and fetch the message
-      await interaction.reply({
-        embeds: [embed],
-        components: rows,
-        ephemeral: true,
-      });
-      const msg = await interaction.fetchReply();
-      
-
-      // collector for either select menu, 2 minutes
-      const collector = msg.createMessageComponentCollector({
-        // componentType: ComponentType.ChannelSelect || ComponentType.RoleSelect,
-        time: 30_000,
-        filter: i => i.user.id === interaction.user.id,
-      });
-
-      collector.on("collect", async i => {
-        if (i.user.id !== interaction.user.id)
-          return i.reply({ content:"You aren't allowed to use this command", ephemeral: true });
-      
-        if (i.isChannelSelectMenu()) {
-          if (i.customId === "dashboard_channel") {
-            cfg.scrimThreadChannelId = i.values[0];
-          } else if (i.customId === "dashboard_category") {
-            cfg.teamCategoryId = i.values[0];
-          }
-        } else if (i.isRoleSelectMenu()) {
-          if (i.customId === "dashboard_role") {
-            cfg.adminRoleId = i.values[0];
-          } else if (i.customId === "dashboard_captain_role") {
-            cfg.captainRoleId = i.values[0];
-          }
+        await btnInt.update({ embeds: [settingsEmbed], components: rows});
         }
-        writeConfig(cfg);
-      
-        const updatedEmbed = EmbedBuilder.from(embed).setDescription(`
-      **Settings updated!**
-      • Scrim-thread channel: ${cfg.scrimThreadChannelId ? `<#${cfg.scrimThreadChannelId}>` : "_not set_"}
-      • Team channel category: ${cfg.teamCategoryId ? `<#${cfg.teamCategoryId}>` : "_not set_"}
-      • Admin role: ${cfg.adminRoleId ? `<@&${cfg.adminRoleId}>` : "_not set_"}
-      • Captains role: ${cfg.captainRoleId ? `<@&${cfg.captainRoleId}>` : "_not set_"}
-        `.trim());
-        
-        await i.update({ embeds: [updatedEmbed], components: rows });
-      });
-    },
+
+        // ANNOUNCEMENT -> open a modal
+      if (btnInt.customId === "dashboard_announce") {
+        const modal = new ModalBuilder()
+          .setCustomId("announceModal")
+          .setTitle("📢 Global Announcement")
+          .addComponents(
+            new ActionRowBuilder<TextInputBuilder>().addComponents(
+              new TextInputBuilder()
+                .setCustomId("announcement_text")
+                .setLabel("Your announcement")
+                .setStyle(TextInputStyle.Paragraph)
+                .setPlaceholder("Enter your announcement here")
+                .setRequired(true)
+            )
+          );
+        await btnInt.showModal(modal);
+
+        try {
+          const submitted = await btnInt.awaitModalSubmit({
+            filter: (m) => 
+              m.customId === "announceModal" && m.user.id === interaction.user.id,
+            time: 120_000,
+          });
+
+          const announcement = submitted.fields.getTextInputValue("announcement_text");
+          const teams = await storage.getTeamsWithMembers();
+          let sentCount = 0;
+
+          for (const team of teams) {
+            if (!team.channelId) continue;
+            const channel = await interaction.guild!
+              .channels.fetch(team.channelId)
+              .catch(() => null);
+            if (!channel?.isTextBased()) continue;
+
+            // find the team role by name
+            const role = interaction.guild!.roles.cache.find(
+              (r) => r.name === team.name
+            );
+            const ping = role ? ` <@&${role.id}>` : "";
+
+            const annEmbed = new EmbedBuilder()
+              .setTitle("📢 Announcement")
+              .setDescription(announcement)
+              .setColor(0x00ae86)
+              .setFooter({ text: `To: ${team.name}` });
+            
+            await channel.send({ content: ping, embeds: [annEmbed] });
+            sentCount++;
+          }
+
+          await submitted.reply({
+            content: `✅ Sent announcement to **${sentCount}** team channels.`,
+            ephemeral: true,
+          });
+        } catch (err) {
+          console.error(err);
+        }
+      }
+    });
+  },
   };
 
   if (process.env.REGISTER_COMMANDS === "true" && process.env.DISCORD_BOT_TOKEN && process.env.APPLICATION_ID) {
