@@ -163,6 +163,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
       handleError(err as Error, res);
     }
   });
+
+  app.post("/api/teams/:id/archive", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const team = await storage.getTeam(id);
+      if (!team) {
+        return res.status(404).json({ message: "Team not found" });
+      }
+
+      // ←– do *not* call deleteTeamResources here
+      await storage.deleteTeam(id);
+
+      const result = await storage.getTeamsWithMembers();
+      broadcastUpdate("teams‐updated", result);
+
+      res.sendStatus(204);
+    } catch (err) {
+      handleError(err as Error, res);
+    }
+  });
   
   app.delete("/api/teams/:id", async (req, res) => {
     try {
