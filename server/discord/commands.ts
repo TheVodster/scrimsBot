@@ -635,211 +635,261 @@ export function registerCommands(storage: IStorage) {
         embeds: [dashEmbed],
         components: [dashRow],
         ephemeral: true,
-        fetchReply: true,
       });
       const msg = await interaction.fetchReply();
 
       // collector for the buttons
       const collector = msg.createMessageComponentCollector({
-        componentType: ComponentType.Button,
         time: 30_000,
         filter: i => i.user.id === interaction.user.id,
       });
 
-      collector.on("collect", async (btnInt) => {
-        // ─── SETTINGS ─────────────────────────────────────────────────────────
-        if (btnInt.customId === "dashboard_settings") {
-          const cfg = readConfig();
-          const settingsEmbed = new EmbedBuilder()
-            .setTitle("🔧 Dashboard Settings")
-            .setDescription(
-            `**Current settings:**\n
-            • Scrim-thread channel: ${cfg.scrimThreadChannelId ? `<#${cfg.scrimThreadChannelId}>` : "_not set_"}\n
-            • Team channels category: ${cfg.teamCategoryId ? `<#${cfg.teamCategoryId}>` : "_not set_"}\n
-            • Admin role: ${cfg.adminRoleId ? `<@&${cfg.adminRoleId}>` : "_not set_"}\n
-            • Captains role:        ${cfg.captainRoleId  ? `<@&${cfg.captainRoleId}>`  : "_not set_"}\n\n
-            Select a channel or role below to update.`.trim())
-            .setColor(0x5865f2);
+      collector.on("collect", async i => {
+        // ─── BUTTONS ───────────────────────────────────────────────────────────
+        if (i.isButton()) {
+          if (i.customId === "dashboard_settings") {
+            const cfg = readConfig();
+            const settingsEmbed = new EmbedBuilder()
+              .setTitle("🔧 Dashboard Settings")
+              .setDescription(
+              `**Current settings:**\n
+              • Scrim-thread channel: ${cfg.scrimThreadChannelId ? `<#${cfg.scrimThreadChannelId}>` : "_not set_"}\n
+              • Team channels category: ${cfg.teamCategoryId ? `<#${cfg.teamCategoryId}>` : "_not set_"}\n
+              • Admin role: ${cfg.adminRoleId ? `<@&${cfg.adminRoleId}>` : "_not set_"}\n
+              • Captains role:        ${cfg.captainRoleId  ? `<@&${cfg.captainRoleId}>`  : "_not set_"}\n\n
+              Select a channel or role below to update.`.trim())
+              .setColor(0x5865f2);
 
-          // build select-menu rows
-          const rows = [
-            new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(
-              new ChannelSelectMenuBuilder()
-                .setCustomId("dashboard_channel")
-                .setPlaceholder("Select scrim-thread channel")
-                .addChannelTypes(ChannelType.GuildText)
-                .setMinValues(1)
-                .setMaxValues(1)
-            ),
-            new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(
-              new ChannelSelectMenuBuilder()
-                .setCustomId("dashboard_category")
-                .setPlaceholder("Select team channels category")
-                .addChannelTypes(ChannelType.GuildCategory)
-                .setMinValues(1)
-                .setMaxValues(1)
-            ),
-            new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(
-              new RoleSelectMenuBuilder()
-                .setCustomId("dashboard_role")
-                .setPlaceholder("Select admin role")
-                .setMinValues(1)
-                .setMaxValues(1)
-            ),
-            new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(
-              new RoleSelectMenuBuilder()
-                .setCustomId("dashboard_captain_role")
-                .setPlaceholder("Select captains role")
-                .setMinValues(1)
-                .setMaxValues(1)
-            )
-          ];
+            // build select-menu rows
+            const rows = [
+              new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(
+                new ChannelSelectMenuBuilder()
+                  .setCustomId("dashboard_channel")
+                  .setPlaceholder("Select scrim-thread channel")
+                  .addChannelTypes(ChannelType.GuildText)
+                  .setMinValues(1)
+                  .setMaxValues(1)
+              ),
+              new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(
+                new ChannelSelectMenuBuilder()
+                  .setCustomId("dashboard_category")
+                  .setPlaceholder("Select team channels category")
+                  .addChannelTypes(ChannelType.GuildCategory)
+                  .setMinValues(1)
+                  .setMaxValues(1)
+              ),
+              new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(
+                new RoleSelectMenuBuilder()
+                  .setCustomId("dashboard_role")
+                  .setPlaceholder("Select admin role")
+                  .setMinValues(1)
+                  .setMaxValues(1)
+              ),
+              new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(
+                new RoleSelectMenuBuilder()
+                  .setCustomId("dashboard_captain_role")
+                  .setPlaceholder("Select captains role")
+                  .setMinValues(1)
+                  .setMaxValues(1)
+              )
+            ];
 
-        await btnInt.update({ embeds: [settingsEmbed], components: rows});
-        }
-
-      // ─── ANNOUNCEMENT ────────────────────────────────────────────────────
-      if (btnInt.customId === "dashboard_announce") {
-        const modal = new ModalBuilder()
-          .setCustomId("announceModal")
-          .setTitle("📢 Global Announcement")
-          .addComponents(
-            new ActionRowBuilder<TextInputBuilder>().addComponents(
-              new TextInputBuilder()
-                .setCustomId("announcement_text")
-                .setLabel("Your announcement")
-                .setStyle(TextInputStyle.Paragraph)
-                .setPlaceholder("Enter your announcement here")
-                .setRequired(true)
-            )
-          );
-        await btnInt.showModal(modal);
-
-        try {
-          const submitted = await btnInt.awaitModalSubmit({
-            filter: (m) => 
-              m.customId === "announceModal" && m.user.id === interaction.user.id,
-            time: 120_000,
-          });
-
-          const announcement = submitted.fields.getTextInputValue("announcement_text");
-          const teams = await storage.getTeamsWithMembers();
-          let sentCount = 0;
-
-          for (const team of teams) {
-            if (!team.channelId) continue;
-            const channel = await interaction.guild!
-              .channels.fetch(team.channelId)
-              .catch(() => null);
-            if (!channel?.isTextBased()) continue;
-
-            // find the team role by name
-            const role = interaction.guild!.roles.cache.find(
-              (r) => r.name === team.name
-            );
-            const ping = role ? ` <@&${role.id}>` : "";
-
-            const annEmbed = new EmbedBuilder()
-              .setTitle("📢 Announcement")
-              .setDescription(announcement)
-              .setColor(0x00ae86)
-              .setFooter({ text: `To: ${team.name}` });
-            
-            await channel.send({ content: ping, embeds: [annEmbed] });
-            sentCount++;
+            await i.update({ embeds: [settingsEmbed], components: rows});
+            return;
           }
 
-          await submitted.reply({
-            content: `✅ Sent announcement to **${sentCount}** team channels.`,
-            ephemeral: true,
-          });
-        } catch (err) {
-          console.error(err);
-        }
-      }
-      // ─── ARCHIVE TOURNAMENT ──────────────────────────────────────────────
-      if (btnInt.customId === "dashboard_archive") {
-        await btnInt.deferReply({ ephemeral: true });
-        const cfg = readConfig();
-        const guild = interaction.guild!;
-        const cat = guild.channels.cache.get(cfg.teamCategoryId!);
-        if (!cat || cat.type !== ChannelType.GuildCategory) {
-          return btnInt.editReply({ content: "⚠️ Team-channels category is not set or invalid." });
-        }
+          // ─── ANNOUNCEMENT ────────────────────────────────────────────────────
+          if (i.customId === "dashboard_announce") {
+            const modal = new ModalBuilder()
+              .setCustomId("announceModal")
+              .setTitle("📢 Global Announcement")
+              .addComponents(
+                new ActionRowBuilder<TextInputBuilder>().addComponents(
+                  new TextInputBuilder()
+                    .setCustomId("announcement_text")
+                    .setLabel("Your announcement")
+                    .setStyle(TextInputStyle.Paragraph)
+                    .setPlaceholder("Enter your announcement here")
+                    .setRequired(true)
+                )
+              );
+            await i.showModal(modal);
 
-        // collect all channels in the category
-        const children = guild.channels.cache.filter(c => c.parentId === cat.id);
-        let count = 0;
-
-        for (const ch of children.values()) {
-          if (!ch.isTextBased()) continue;
-          // find team by channelId
-          const team = (await storage.getTeamsWithMembers()).find(t => t.channelId === ch.id);
-          if (!team) continue;
-
-          // reset permission overwrites so only admins / owner see it
-          if (ch.type === ChannelType.GuildText) {
-            await ch.permissionOverwrites.set([
-              // 1) block @everyone
-              { id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+            try {
+              const submitted = await i.awaitModalSubmit({
+                filter: (m) => 
+                  m.customId === "announceModal" && m.user.id === interaction.user.id,
+                time: 120_000,
+              });
             
-              // 2) allow only the server owner
-              {
-                id: guild.ownerId,
-                allow: [
-                  PermissionsBitField.Flags.ViewChannel,
-                  PermissionsBitField.Flags.SendMessages
+              const announcement = submitted.fields.getTextInputValue("announcement_text");
+              const teams = await storage.getTeamsWithMembers();
+              let sentCount = 0;
+            
+              for (const team of teams) {
+                if (!team.channelId) continue;
+                const channel = await interaction.guild!
+                  .channels.fetch(team.channelId)
+                  .catch(() => null);
+                if (!channel?.isTextBased()) continue;
+              
+                // find the team role by name
+                const role = interaction.guild!.roles.cache.find(
+                  (r) => r.name === team.name
+                );
+                const ping = role ? ` <@&${role.id}>` : "";
+              
+                const annEmbed = new EmbedBuilder()
+                  .setTitle("📢 Announcement")
+                  .setDescription(announcement)
+                  .setColor(0x00ae86)
+                  .setFooter({ text: `To: ${team.name}` });
+
+                await channel.send({ content: ping, embeds: [annEmbed] });
+                sentCount++;
+              }
+            
+              await submitted.reply({
+                content: `✅ Sent announcement to **${sentCount}** team channels.`,
+                ephemeral: true,
+              });
+            } catch (err) {
+              console.error(err);
+            }
+            return;
+          }
+
+          // ─── ARCHIVE TOURNAMENT ──────────────────────────────────────────────
+          if (i.customId === "dashboard_archive") {
+            await i.deferReply({ ephemeral: true });
+            const cfg = readConfig();
+            const guild = interaction.guild!;
+            const cat = guild.channels.cache.get(cfg.teamCategoryId!);
+            if (!cat || cat.type !== ChannelType.GuildCategory) {
+              return i.editReply({ content: "⚠️ Team-channels category is not set or invalid." });
+            }
+          
+            // collect all channels in the category
+            const children = guild.channels.cache.filter(c => c.parentId === cat.id);
+            let count = 0;
+          
+            for (const ch of children.values()) {
+              if (!ch.isTextBased()) continue;
+              // find team by channelId
+              const team = (await storage.getTeamsWithMembers()).find(t => t.channelId === ch.id);
+              if (!team) continue;
+            
+              // reset permission overwrites so only admins / owner see it
+              if (ch.type === ChannelType.GuildText) {
+                await ch.permissionOverwrites.set([
+                  // 1) block @everyone
+                  { id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+                
+                  // 2) allow only the server owner
+                  {
+                    id: guild.ownerId,
+                    allow: [
+                      PermissionsBitField.Flags.ViewChannel,
+                      PermissionsBitField.Flags.SendMessages
+                    ]
+                  }
+                ], "Archive tournament");
+              }
+            
+              // post roster
+              const roster = team.members.map(m => `<@${m.discordId}>`).join("\n");
+              await ch.send({
+                embeds: [
+                  new EmbedBuilder()
+                    .setTitle("🏁 Tournament Archived")
+                    .setDescription(`**${team.name}** final roster:\n` + roster || "*No members found*")
+                    .setColor(0xff0000)
                 ]
+              });
+            
+              // delete team-scoped role
+              const teamRole = guild.roles.cache.find(r => r.name === team.name);
+              if (teamRole) {
+                // strip from members
+                for (const mem of guild.members.cache.values()) {
+                  if (mem.roles.cache.has(teamRole.id)) {
+                    await mem.roles.remove(teamRole);
+                  }
+                }
+                await teamRole.delete("Archive tournament");
               }
-            ], "Archive tournament");
-          }
-
-          // post roster
-          const roster = team.members.map(m => `<@${m.discordId}>`).join("\n");
-          await ch.send({
-            embeds: [
-              new EmbedBuilder()
-                .setTitle("🏁 Tournament Archived")
-                .setDescription(`**${team.name}** final roster:\n` + roster || "*No members found*")
-                .setColor(0xff0000)
-            ]
-          });
-
-          // delete team-scoped role
-          const teamRole = guild.roles.cache.find(r => r.name === team.name);
-          if (teamRole) {
-            // strip from members
-            for (const mem of guild.members.cache.values()) {
-              if (mem.roles.cache.has(teamRole.id)) {
-                await mem.roles.remove(teamRole);
+            
+              // remove static captain role from this captain
+              if (cfg.captainRoleId) {
+                const cap = await guild.members.fetch(team.captainDiscordId).catch(() => null);
+                if (cap &&  cap.roles.cache.has(cfg.captainRoleId)) {
+                  await cap.roles.remove(cfg.captainRoleId);
+                }
               }
+            
+              await fetch(`http://${API_BASE}/api/teams/${team.id}/archive`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+              });
+            
+              count++;
             }
-            await teamRole.delete("Archive tournament");
+          
+            const all = await storage.getTeamsWithMembers();
+          
+            await i.editReply({ content: `✅ Archived **${count}** team channels and deleted associated roles.`});
+            return;
           }
-
-          // remove static captain role from this captain
-          if (cfg.captainRoleId) {
-            const cap = await guild.members.fetch(team.captainDiscordId).catch(() => null);
-            if (cap &&  cap.roles.cache.has(cfg.captainRoleId)) {
-              await cap.roles.remove(cfg.captainRoleId);
-            }
-          }
-
-          await fetch(`http://${API_BASE}/api/teams/${team.id}/archive`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-          });
-
-          count++;
         }
 
-        const all = await storage.getTeamsWithMembers();
+        // ─── CHANNEL SELECT MENUS ───────────────────────────────────────────────
+        if (i.isChannelSelectMenu()) {
+          const cfg = readConfig();
+          if (i.customId === "dashboard_channel") {
+            cfg.scrimThreadChannelId = i.values[0];
+            writeConfig(cfg);
+            await i.update({
+              content: `✅ Scrim-thread channel set to <#${i.values[0]}>`,
+              embeds: [],
+              components: []
+            });
+          } else if (i.customId === "dashboard_category") {
+            cfg.teamCategoryId = i.values[0];
+            writeConfig(cfg);
+            await i.update({
+              content: `✅ Team-channels category set to <#${i.values[0]}>`,
+              embeds: [],
+              components: []
+            });
+          }
+          return;
+        }
 
-        await btnInt.editReply({ content: `✅ Archived **${count}** team channels and deleted associated roles.`});
-      }
-    });
+        // ─── ROLE SELECT MENUS ─────────────────────────────────────────────────
+        if (i.isRoleSelectMenu()) {
+          const cfg = readConfig();
+          if (i.customId === "dashboard_role") {
+            cfg.adminRoleId = i.values[0];
+            writeConfig(cfg);
+            await i.update({
+              content: `✅ Admin role set to <@&${i.values[0]}>`,
+              embeds: [],
+              components: []
+            });
+          } else if (i.customId === "dashboard_captain_role") {
+            cfg.captainRoleId = i.values[0];
+            writeConfig(cfg);
+            await i.update({
+              content: `✅ Captains role set to <@&${i.values[0]}>`,
+              embeds: [],
+              components: []
+            });
+          }
+          return;
+        }
+      });
   },
-  };
+};
 
   if (process.env.REGISTER_COMMANDS === "true" && process.env.DISCORD_BOT_TOKEN && process.env.APPLICATION_ID) {
     const commands = [
